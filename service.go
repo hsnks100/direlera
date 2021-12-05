@@ -153,3 +153,28 @@ func SvcUserQuit(server net.PacketConn, addr net.Addr, ph Protocol) {
 	}
 	delete(GetUC().Users, addr.String())
 }
+
+func SvcCreateGame(server net.PacketConn, addr net.Addr, ph Protocol) {
+	log.Infof("================ SvcCreateGame ===============")
+	// user := GetUC().Users[addr.String()]
+	fields := bytes.Split(ph.data, []byte{0})
+	for i, j := range fields {
+		log.Infof("SvcCreateGame %d: %s", i, j)
+	}
+	for _, u := range GetUC().Users {
+		p := Protocol{}
+		p.header.Seq = uint16(u.SendCount)
+		p.header.MessageType = 0x0A
+		p.data = append(p.data, []byte(u.Name+"\x00")...)
+		p.data = append(p.data, append(fields[1], 0)...)
+		p.data = append(p.data, []byte(u.EmulName+"\x00")...)
+		p.data = append(p.data, Uint32ToBytes(100)...) // Game id ??
+		u.Packets = append(u.Packets, p)
+		packet := make([]byte, 0)
+		packet = append(packet, 1) // N = 1
+		packet = append(packet, p.MakePacket()...)
+		server.WriteTo(packet, u.IpAddr)
+		log.Infof("WriteTo: %s", u.IpAddr.String())
+		u.SendCount += 1
+	}
+}

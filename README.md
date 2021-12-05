@@ -6,6 +6,14 @@ go build
 ./direlera
 ```
 
+# todo
+game list update... & user info update.
+
+# Special Thank you
+
+서영철(osio)
+
+
 # wireshark
 
 filter: ip.addr == 220.85.140.51

@@ -87,6 +87,8 @@ func MakeProcServer() net.Addr {
 				SvcChatMesg(server, clientAddress, msgtype) // , rawdata[:])
 			} else if msgtype.header.MessageType == 0x01 {
 				SvcUserQuit(server, clientAddress, msgtype)
+			} else if msgtype.header.MessageType == 0x0a {
+				SvcCreateGame(server, clientAddress, msgtype)
 			} else {
 				log.Infof("unknown Message[%2x]: %+v", msgtype.header.MessageType, msgtype)
 			}
