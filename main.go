@@ -79,7 +79,9 @@ func MakeProcServer() net.Addr {
 
 			if msgtype.header.MessageType == 0x03 {
 				GetUC().AddUser(clientAddress, NewUserStruct())
-				GetUC().Users[clientAddress.String()].Id = "temp"
+				GetUC().NextUserId += 1
+				GetUC().Users[clientAddress.String()].UserId = GetUC().NextUserId
+				GetUC().Users[clientAddress.String()].PlayerStatus = 1
 				SvcUserLogin(server, clientAddress, msgtype) // , rawdata[:])
 			} else if msgtype.header.MessageType == 0x06 {
 				SvcAck(server, clientAddress, msgtype) // , rawdata[:])
@@ -89,6 +91,8 @@ func MakeProcServer() net.Addr {
 				SvcUserQuit(server, clientAddress, msgtype)
 			} else if msgtype.header.MessageType == 0x0a {
 				SvcCreateGame(server, clientAddress, msgtype)
+			} else if msgtype.header.MessageType == 0x0c {
+				SvcJoinGame(server, clientAddress, msgtype)
 			} else {
 				log.Infof("unknown Message[%2x]: %+v", msgtype.header.MessageType, msgtype)
 			}
