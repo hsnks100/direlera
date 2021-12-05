@@ -5,15 +5,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
-
-	log "github.com/sirupsen/logrus"
 )
 
 type UserStruct struct {
-	Ip           string
+	IpAddr       net.Addr
 	Id           string
 	Name         string
+	EmulName     string
 	Ping         uint32
 	ConnectType  uint8
 	PlayerStatus uint8
@@ -42,6 +42,7 @@ func NewChannelStruct() *ChannelStruct {
 type UserChannel struct {
 	Users    map[string]*UserStruct
 	Channels map[string]*ChannelStruct
+	RandomId int
 }
 
 var instance *UserChannel
@@ -66,10 +67,10 @@ func (t *UserChannel) AddChannel(ch string, u ChannelStruct) error {
 	return nil
 }
 
-func (t *UserChannel) AddUser(ip string, u *UserStruct) error {
-	if _, ok := t.Users[ip]; !ok {
-		u.Ip = ip
-		t.Users[ip] = u
+func (t *UserChannel) AddUser(ipaddr net.Addr, u *UserStruct) error {
+	if _, ok := t.Users[ipaddr.String()]; !ok {
+		u.IpAddr = ipaddr
+		t.Users[ipaddr.String()] = u
 	} else {
 		log.Infof("exist user")
 		return errors.New("exist")
@@ -82,18 +83,22 @@ func Uint32ToBytes(i uint32) []byte {
 	binary.LittleEndian.PutUint32(b, i)
 	return b
 }
-func (t *UserChannel) MakeServerStatus(seq uint16) Protocol {
+func (t *UserChannel) MakeServerStatus(seq uint16, user *UserStruct) Protocol {
 	ret := make([]byte, 0)
 	ret = append(ret, 0)
-	ret = append(ret, Uint32ToBytes(uint32(len(GetUC().Users)))...)
+	ret = append(ret, Uint32ToBytes(uint32(len(GetUC().Users)-1))...)
 	ret = append(ret, Uint32ToBytes(0)...)
 
 	for _, j := range GetUC().Users {
-		ret = append(ret, []byte(j.Name+"\x00")...)
-		ret = append(ret, Uint32ToBytes(j.Ping)...)
-		ret = append(ret, j.ConnectType)
-		ret = append(ret, []byte(j.Id[:2])...)
-		ret = append(ret, j.PlayerStatus)
+		// 본인은 제외함.
+		log.Infof("MakeStatus %s != %s", j.IpAddr.String(), user.IpAddr.String())
+		if j.IpAddr.String() != user.IpAddr.String() {
+			ret = append(ret, []byte(j.Name+"\x00")...)
+			ret = append(ret, Uint32ToBytes(j.Ping)...)
+			ret = append(ret, j.ConnectType)
+			ret = append(ret, []byte(j.Id[:2])...)
+			ret = append(ret, j.PlayerStatus)
+		}
 	}
 	fmt.Printf("%s\n", hex.Dump(ret))
 	p := Protocol{}
