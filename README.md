@@ -9,6 +9,11 @@ go build
 # todo
 game list update... & user info update.
 
+기존 유저 목록들 정보 이상하게 나옴. 왜 그러지?
+
+방닫을 때 방 정리하기.
+
+
 # Special Thank you
 
 서영철(osio)
