@@ -1,4 +1,11 @@
 # direlera
+
+BUILD  
+```
+go build
+./direlera
+```
+
 # wireshark
 
 filter: ip.addr == 220.85.140.51
