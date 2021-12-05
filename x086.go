@@ -5,12 +5,22 @@ import (
 	"encoding/binary"
 )
 
+/*
+N
+   seq1[2] length[2] msg_type [DATA]
+   seq0[2] length[2] msg_type [DATA] ...
+
+   length 는 msg_type 을 포함한 길이.
+*/
 type x086_ack struct {
 	dummy0 uint8
 	dummy1 uint32
 	dummy2 uint32
 	dummy3 uint32
 	dummy4 uint32
+}
+
+type x086ServerStatus struct {
 }
 
 func MakeMergePacket(packets [][]byte) []byte {
@@ -22,21 +32,10 @@ func MakeMergePacket(packets [][]byte) []byte {
 }
 
 func MakePacketHeaderBody(seq uint16, msgtype uint8, body []byte) []byte {
-	header := ProtocolHeader{}
-	header.N = 1
-	header.Seq = seq
-	header.Length = uint16(len(body) + 1)
-	header.MessageType = msgtype
-	ret := make([]byte, 0)
-
-	buff := new(bytes.Buffer)
-	binary.Write(buff, binary.LittleEndian, &header)
-	ret = append(ret, buff.Bytes()...)
-	ret = append(ret, body...)
-	return ret
+	return nil
 }
 
-func MakeServerAck(seq uint16) []byte {
+func MakeServerAck() []byte {
 	header := x086_ack{
 		dummy0: 0,
 		dummy1: 0,
@@ -46,5 +45,5 @@ func MakeServerAck(seq uint16) []byte {
 	}
 	buff := new(bytes.Buffer)
 	binary.Write(buff, binary.LittleEndian, &header)
-	return MakePacketHeaderBody(seq, 0x05, buff.Bytes())
+	return buff.Bytes()
 }
