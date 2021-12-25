@@ -19,11 +19,12 @@ type UserStruct struct {
 	PlayerStatus uint8
 	AckCount     uint32
 	SendCount    int32
-	Packets      []Protocol
+	CurSeq       int
+	Packets      []Protocol // 보낸 패킷들
 }
 
 func NewUserStruct() *UserStruct {
-	return &UserStruct{Packets: make([]Protocol, 0)}
+	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0}
 }
 
 type ChannelStruct struct {
@@ -100,12 +101,14 @@ func (t *UserChannel) MakeServerStatus(seq uint16, user *UserStruct) Protocol {
 	for _, j := range GetUC().Users {
 		// 본인은 제외함.
 		if j.IpAddr.String() != user.IpAddr.String() {
-			log.Infof("Make ServerStatus User")
+			log.Infof("Make ServerStatus User %s", j.Name)
 			ret = append(ret, []byte(j.Name+"\x00")...)
 			ret = append(ret, Uint32ToBytes(j.Ping)...)
-			ret = append(ret, j.ConnectType)
-			ret = append(ret, Uint16ToBytes(j.UserId)...)
+			// ret = append(ret, 0)
+			// ret = append(ret, j.ConnectType)
 			ret = append(ret, j.PlayerStatus)
+			ret = append(ret, Uint16ToBytes(j.UserId)...)
+			ret = append(ret, j.ConnectType)
 		}
 	}
 	for _, j := range GetUC().Channels {

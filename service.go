@@ -72,6 +72,7 @@ func SvcAck(server net.PacketConn, addr net.Addr, ph Protocol) { // Header, body
 			packet = append(packet, p.MakePacket()...)
 			server.WriteTo(packet, addr)
 			user.SendCount += 1
+			fmt.Printf("server status: %s", hex.Dump(packet))
 		}
 		// joined packet
 		{

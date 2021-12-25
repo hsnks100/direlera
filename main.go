@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	prefixed "github.com/x-cray/logrus-prefixed-formatter"
+	// prefixed "github.com/x-cray/logrus-prefixed-formatter"
 )
 
 var log = logrus.New()
 
 func init() {
 	// logrus.For
-	log.Formatter = new(prefixed.TextFormatter)
+	// log.Formatter = new(prefixed.TextFormatter)
 	log.Level = logrus.DebugLevel
 }
 
@@ -52,6 +52,30 @@ func (t *Protocol) MakePacket() []byte {
 	return ret
 }
 
+func GetProtocolFromBytes(data []byte) []Protocol {
+	curPos := 0
+	ret := make([]Protocol, 0)
+	for {
+		// log.Infof("%d <= %d", curPos+ProtocolBodySize, len(data))
+		if curPos+ProtocolBodySize <= len(data) {
+			msgtype := Protocol{}
+			// log.Infof("range1 [%d, %d)", curPos, curPos+ProtocolBodySize)
+			buf2 := bytes.NewBuffer(data[curPos : curPos+ProtocolBodySize])
+
+			err := binary.Read(buf2, binary.LittleEndian, &msgtype.header)
+			// log.Infof("range2 [%d, %d)", curPos+ProtocolBodySize, curPos+ProtocolBodySize+int(msgtype.header.Length)-1)
+			msgtype.data = data[curPos+ProtocolBodySize : curPos+ProtocolBodySize+int(msgtype.header.Length)-1]
+			curPos += ProtocolBodySize + int(msgtype.header.Length) - 1
+			if err != nil {
+				break
+			}
+			ret = append(ret, msgtype)
+		} else {
+			break
+		}
+	}
+	return ret
+}
 func MakeProcServer() net.Addr {
 	server, err := net.ListenPacket("udp", "0.0.0.0:27999")
 	if err != nil {
@@ -69,32 +93,62 @@ func MakeProcServer() net.Addr {
 			ph := ProtocolPackets{}
 			buf2 := bytes.NewBuffer(buf[:ProtocolPacketsSize])
 			err = binary.Read(buf2, binary.LittleEndian, &ph)
-			// fmt.Printf("ph: %+v\n", ph)
-			// fmt.Printf("header size: %d\n", ProtocolPacketsSize)
-			msgtype := Protocol{}
-			buf2 = bytes.NewBuffer(buf[ProtocolPacketsSize : ProtocolPacketsSize+ProtocolBodySize])
-			err = binary.Read(buf2, binary.LittleEndian, &msgtype.header)
-			msgtype.data = buf[ProtocolPacketsSize+ProtocolBodySize : ProtocolPacketsSize+ProtocolBodySize+msgtype.header.Length-1]
-			// fmt.Printf("%+v\n", msgtype)
+			// N 만큼의 프로토콜 배열로 다 얻어옴. 그리고 유저가 처리해야할 시퀀스 번호를 가지고 메시지를 구함.
+			messages := GetProtocolFromBytes(buf[1:n])
+			if len(messages) >= 1 {
+				processCount := 0
+				// 처리해야할 메시지가 여러개인 경우 여러개 처리함.
+				for {
+					user := GetUC().Users[clientAddress.String()]
+					msgtype := Protocol{}
+					match := false
+					userSeq := -1
+					if user != nil {
+						userSeq = user.CurSeq
+					}
+					log.Infof("<<<<<<<<<<<<< recovery: want seq: %d ", userSeq+1)
+					for _, j := range messages {
+						if int(j.header.Seq) == userSeq+1 {
+							msgtype = j
+							match = true
+							if user != nil {
+								user.CurSeq = userSeq + 1
+							}
 
-			if msgtype.header.MessageType == 0x03 {
-				GetUC().AddUser(clientAddress, NewUserStruct())
-				GetUC().NextUserId += 1
-				GetUC().Users[clientAddress.String()].UserId = GetUC().NextUserId
-				GetUC().Users[clientAddress.String()].PlayerStatus = 1
-				SvcUserLogin(server, clientAddress, msgtype) // , rawdata[:])
-			} else if msgtype.header.MessageType == 0x06 {
-				SvcAck(server, clientAddress, msgtype) // , rawdata[:])
-			} else if msgtype.header.MessageType == 0x07 {
-				SvcChatMesg(server, clientAddress, msgtype) // , rawdata[:])
-			} else if msgtype.header.MessageType == 0x01 {
-				SvcUserQuit(server, clientAddress, msgtype)
-			} else if msgtype.header.MessageType == 0x0a {
-				SvcCreateGame(server, clientAddress, msgtype)
-			} else if msgtype.header.MessageType == 0x0c {
-				SvcJoinGame(server, clientAddress, msgtype)
+							break
+						}
+						// log.Infof("seq: %d", j.header.Seq)
+					}
+					log.Infof("recovery >>>>>>>>>>>>>>> ")
+					if match {
+						processCount += 1
+						if msgtype.header.MessageType == 0x03 {
+							GetUC().AddUser(clientAddress, NewUserStruct())
+							GetUC().NextUserId += 1
+							GetUC().Users[clientAddress.String()].UserId = GetUC().NextUserId
+							GetUC().Users[clientAddress.String()].PlayerStatus = 1
+							SvcUserLogin(server, clientAddress, msgtype) // , rawdata[:])
+						} else if msgtype.header.MessageType == 0x06 {
+							SvcAck(server, clientAddress, msgtype) // , rawdata[:])
+						} else if msgtype.header.MessageType == 0x07 {
+							SvcChatMesg(server, clientAddress, msgtype) // , rawdata[:])
+						} else if msgtype.header.MessageType == 0x01 {
+							SvcUserQuit(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x0a {
+							SvcCreateGame(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x0c {
+							SvcJoinGame(server, clientAddress, msgtype)
+						} else {
+							log.Infof("unknown Message[%2x]: %+v", msgtype.header.MessageType, msgtype)
+						}
+					} else {
+						log.Infof("match finish, proc count: %d", processCount)
+						break
+					}
+
+				}
 			} else {
-				log.Infof("unknown Message[%2x]: %+v", msgtype.header.MessageType, msgtype)
+				break
 			}
 		}
 	}()
