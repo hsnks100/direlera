@@ -103,13 +103,11 @@ func (t *UserChannel) AddUser(ipaddr net.Addr, u *UserStruct) error {
 func Uint32ToBytes(i uint32) []byte {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, i)
-	log.Infof("%+v: 4 bytes", b)
 	return b
 }
 func Uint16ToBytes(i uint16) []byte {
 	b := make([]byte, 2)
 	binary.LittleEndian.PutUint16(b, i)
-	log.Infof("%+v: 2 bytes", b)
 	return b
 }
 func (t *UserChannel) MakeServerStatus(seq uint16, user *UserStruct) Protocol {

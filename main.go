@@ -122,7 +122,9 @@ func MakeProcServer() net.Addr {
 					log.Infof("recovery >>>>>>>>>>>>>>> ")
 					if match {
 						processCount += 1
-						if msgtype.header.MessageType == 0x03 {
+						if msgtype.header.MessageType == 0x01 {
+							SvcUserQuit(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x03 {
 							GetUC().AddUser(clientAddress, NewUserStruct())
 							GetUC().NextUserId += 1
 							GetUC().Users[clientAddress.String()].UserId = GetUC().NextUserId
@@ -132,16 +134,26 @@ func MakeProcServer() net.Addr {
 							SvcAck(server, clientAddress, msgtype) // , rawdata[:])
 						} else if msgtype.header.MessageType == 0x07 {
 							SvcChatMesg(server, clientAddress, msgtype) // , rawdata[:])
-						} else if msgtype.header.MessageType == 0x01 {
-							SvcUserQuit(server, clientAddress, msgtype)
 						} else if msgtype.header.MessageType == 0x08 {
 							SvcGameChat(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x09 {
+							SvcKeepAlive(server, clientAddress, msgtype)
 						} else if msgtype.header.MessageType == 0x0a {
 							SvcCreateGame(server, clientAddress, msgtype)
 						} else if msgtype.header.MessageType == 0x0b {
 							SvcQuitGame(server, clientAddress, msgtype)
 						} else if msgtype.header.MessageType == 0x0c {
 							SvcJoinGame(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x0f {
+							SvcKickUserFromGame(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x11 {
+							SvcStartGame(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x12 {
+							SvcGameData(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x13 {
+							SvcGameCache(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x14 {
+							SvcDropGame(server, clientAddress, msgtype)
 						} else {
 							log.Infof("unknown Message[%2x]: %+v", msgtype.header.MessageType, msgtype)
 						}

@@ -321,17 +321,35 @@ func SvcQuitGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 			}
 
 		}
-		{
+		for _, u := range GetUC().Users {
 			p := Protocol{}
 			p.header.Seq = uint16(user.SendCount)
 			p.header.MessageType = 0x0B
 			p.data = append(p.data, []byte(user.Name+"\x00")...)
 			p.data = append(p.data, Uint16ToBytes(user.UserId)...)
-			user.SendPacket(server, p)
-
+			u.SendPacket(server, p)
 		}
 	}
 	// user := GetUC().Users[addr.String()]
 	// gameId := binary.LittleEndian.Uint32(ph.data[1:5])
 	// log.Infof("join gameid: %+v", Uint32ToBytes(gameId))
+}
+
+func SvcKeepAlive(server net.PacketConn, addr net.Addr, ph Protocol) {
+	log.Infof("================ SvcKeepAlive ===============")
+}
+func SvcKickUserFromGame(server net.PacketConn, addr net.Addr, ph Protocol) {
+	log.Infof("================ SvcKickUserFromGame ===============")
+}
+func SvcStartGame(server net.PacketConn, addr net.Addr, ph Protocol) {
+	log.Infof("================ SvcStartGame ===============")
+}
+func SvcGameData(server net.PacketConn, addr net.Addr, ph Protocol) {
+	log.Infof("================ SvcGameData ===============")
+}
+func SvcGameCache(server net.PacketConn, addr net.Addr, ph Protocol) {
+	log.Infof("================ SvcGameCache ===============")
+}
+func SvcDropGame(server net.PacketConn, addr net.Addr, ph Protocol) {
+	log.Infof("================ SvcDropGame ===============")
 }
