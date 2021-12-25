@@ -134,8 +134,12 @@ func MakeProcServer() net.Addr {
 							SvcChatMesg(server, clientAddress, msgtype) // , rawdata[:])
 						} else if msgtype.header.MessageType == 0x01 {
 							SvcUserQuit(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x08 {
+							SvcGameChat(server, clientAddress, msgtype)
 						} else if msgtype.header.MessageType == 0x0a {
 							SvcCreateGame(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x0b {
+							SvcQuitGame(server, clientAddress, msgtype)
 						} else if msgtype.header.MessageType == 0x0c {
 							SvcJoinGame(server, clientAddress, msgtype)
 						} else {

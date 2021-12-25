@@ -20,11 +20,23 @@ type UserStruct struct {
 	AckCount     uint32
 	SendCount    int32
 	CurSeq       int
+	GameRoomId   uint32
 	Packets      []Protocol // 보낸 패킷들
 }
 
 func NewUserStruct() *UserStruct {
 	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0}
+}
+
+func (u *UserStruct) SendPacket(server net.PacketConn, p Protocol) {
+	p.header.Seq = uint16(u.SendCount)
+	u.Packets = append(u.Packets, p)
+	packet := make([]byte, 0)
+	packet = append(packet, 1) // N = 1
+	packet = append(packet, p.MakePacket()...)
+	server.WriteTo(packet, u.IpAddr)
+	// log.Infof("WriteTo: %s", u.IpAddr.String())
+	u.SendCount += 1
 }
 
 type ChannelStruct struct {
@@ -69,6 +81,14 @@ func (t *UserChannel) AddChannel(ch uint32, u *ChannelStruct) error {
 	return nil
 }
 
+func (t *UserChannel) DeleteChannel(ch uint32) error {
+	if _, ok := t.Channels[ch]; !ok {
+		return errors.New("don't exist")
+	} else {
+		delete(t.Channels, ch)
+	}
+	return nil
+}
 func (t *UserChannel) AddUser(ipaddr net.Addr, u *UserStruct) error {
 	if _, ok := t.Users[ipaddr.String()]; !ok {
 		u.IpAddr = ipaddr
