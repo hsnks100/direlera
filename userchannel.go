@@ -21,11 +21,32 @@ type UserStruct struct {
 	SendCount    int32
 	CurSeq       int
 	GameRoomId   uint32
+	RoomOrder    int
+	Inputs       []byte
 	Packets      []Protocol // 보낸 패킷들
+	CallCnt      int
+	CallCntTime  int64
+	LastInput    []byte
+
+	CachePosition    uint8
+	IncomingGameData map[uint8][]byte
+	RequireFrame     int
+	// 보내기전에 HitCache 에 조회해보고 있으면 value 보내고
+	//                                   없으면 GameData 보냄.
+	OutcomingGameCache     map[uint8][]byte
+	OutcomingHitCache      map[string]uint8
+	OutcomingCachePosition uint8
+}
+
+func (u *UserStruct) ResetOutcoming() {
+	u.OutcomingCachePosition = 0
+	u.OutcomingGameCache = map[uint8][]byte{}
+	u.OutcomingHitCache = map[string]uint8{}
 }
 
 func NewUserStruct() *UserStruct {
-	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0}
+	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0, Inputs: make([]byte, 0), IncomingGameData: map[uint8][]byte{}, LastInput: []byte{},
+		OutcomingGameCache: map[uint8][]byte{}, OutcomingHitCache: map[string]uint8{}}
 }
 
 func (u *UserStruct) SendPacket(server net.PacketConn, p Protocol) {
@@ -40,12 +61,13 @@ func (u *UserStruct) SendPacket(server net.PacketConn, p Protocol) {
 }
 
 type ChannelStruct struct {
-	GameName   string
-	GameId     uint32
-	EmulName   string
-	CreatorId  string
-	Players    map[string]struct{}
-	GameStatus uint8
+	GameName      string
+	GameId        uint32
+	EmulName      string
+	CreatorId     string
+	Players       map[string]struct{}
+	GameStatus    uint8
+	CachePosition int
 }
 
 func NewChannelStruct() *ChannelStruct {

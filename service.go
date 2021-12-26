@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"time"
 )
 
 func SvcUserLogin(server net.PacketConn, addr net.Addr, ph Protocol) {
@@ -343,12 +344,191 @@ func SvcKickUserFromGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 }
 func SvcStartGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 	log.Infof("================ SvcStartGame ===============")
+	if len(ph.data) == 5 && ph.data[0] == 0x00 && ph.data[1] == 0xff && ph.data[2] == 0xff && ph.data[3] == 0xff && ph.data[4] == 0xff {
+		user := GetUC().Users[addr.String()]
+		cs := GetUC().Channels[user.GameRoomId]
+		cs.GameStatus = 2
+		order := uint8(0)
+		for _, u := range GetUC().Users {
+			p := Protocol{}
+			p.header.Seq = uint16(u.SendCount)
+			p.header.MessageType = 0x0E
+			p.data = append(p.data, 0)
+			p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
+			p.data = append(p.data, cs.GameStatus)
+			p.data = append(p.data, uint8(len(cs.Players)))
+			p.data = append(p.data, 4)
+			u.SendPacket(server, p)
+		}
+		for i := range cs.Players {
+			order += 1
+			u := GetUC().Users[i]
+			u.RoomOrder = int(order)
+			p := Protocol{}
+			p.header.MessageType = 0x11
+			p.data = append(p.data, 0)
+			p.data = append(p.data, Uint16ToBytes(5)...)
+			p.data = append(p.data, order+1)
+			tt := len(cs.Players)
+			p.data = append(p.data, byte(tt))
+			u.ResetOutcoming()
+			u.SendPacket(server, p)
+		}
+	}
 }
+func SvcReadyToPlaySignal(server net.PacketConn, addr net.Addr, ph Protocol) {
+	log.Infof("================ SvcReadyToPlaySignal ===============")
+	fmt.Println(hex.Dump(ph.data))
+	if len(ph.data) == 1 && ph.data[0] == 0x00 {
+		user := GetUC().Users[addr.String()]
+		cs := GetUC().Channels[user.GameRoomId]
+		cs.GameStatus = 1
+		for _, u := range GetUC().Users {
+			p := Protocol{}
+			p.header.Seq = uint16(u.SendCount)
+			p.header.MessageType = 0x0E
+			p.data = append(p.data, 0)
+			p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
+			p.data = append(p.data, cs.GameStatus)
+			p.data = append(p.data, uint8(len(cs.Players)))
+			p.data = append(p.data, 4)
+			u.SendPacket(server, p)
+		}
+		for i := range cs.Players {
+			u := GetUC().Users[i]
+			p := Protocol{}
+			p.header.MessageType = 0x15
+			p.data = append(p.data, 0)
+			u.SendPacket(server, p)
+		}
+	}
+}
+
+var seq bool = false
+
 func SvcGameData(server net.PacketConn, addr net.Addr, ph Protocol) {
-	log.Infof("================ SvcGameData ===============")
+	seq = false
+	log.Infof("================ SvcGameData %s===============", addr.String())
+	fmt.Println(hex.Dump(ph.data))
+	if len(ph.data) < 3 {
+		return
+	}
+	gameDataLength := binary.LittleEndian.Uint16(ph.data[1:3])
+	if len(ph.data) < 3+int(gameDataLength) {
+		return
+	}
+	gameData := ph.data[3 : 3+gameDataLength]
+	// if gameData[0] == 0 && gameData[1] == 0 {
+	// 	gameData[0] = 1
+	// 	gameData[1] = 0
+	// }
+
+	user := GetUC().Users[addr.String()]
+	user.Inputs = gameData
+	user.CallCnt += 1
+	/*
+		bb := make([]byte, 0)
+		cs := GetUC().Channels[user.GameRoomId]
+		for i := range cs.Players {
+			u := GetUC().Users[i]
+			bb = append(bb, u.Inputs...)
+		}
+		for i := range cs.Players {
+			u := GetUC().Users[i]
+			p := Protocol{}
+			p.header.MessageType = 0x12
+			p.data = append(p.data, 0)
+			p.data = append(p.data, Uint16ToBytes(uint16(len(bb)))...)
+			p.data = append(p.data, bb...)
+			u.SendPacket(server, p)
+		}
+	*/
+	InputProcess(server, addr, ph)
 }
+
+var beforeCache []byte = make([]byte, 0)
+
 func SvcGameCache(server net.PacketConn, addr net.Addr, ph Protocol) {
-	log.Infof("================ SvcGameCache ===============")
+	if ph.data[0] != 0x00 || ph.data[1] != 0x00 {
+		// log.Infof("================ SvcGameCache ===============")
+		// fmt.Println(hex.Dump(ph.data))
+	}
+	if len(ph.data) != 2 {
+		return
+	}
+	cachePosition := ph.data[1]
+	user := GetUC().Users[addr.String()]
+	log.Infof("require cache pos: %d", cachePosition)
+	if _, ok := user.IncomingGameData[cachePosition]; !ok {
+		log.Infof("%d player: cache create %+v", user.RoomOrder, user.Inputs)
+		user.IncomingGameData[cachePosition] = user.Inputs
+	} else {
+		user.Inputs = user.IncomingGameData[cachePosition]
+		log.Infof("%d player: match cache %+v", user.RoomOrder, user.Inputs)
+		if bytes.Compare(user.Inputs, user.IncomingGameData[cachePosition]) == 0 {
+
+		} else {
+		}
+	}
+	user.CallCnt += 1
+	now := time.Now() // current local time
+	ms := now.UnixNano() / 1000 / 1000
+	if ms-user.CallCntTime >= 1000 {
+		user.CallCntTime = ms
+		log.Infof("fps: %d, %s", user.CallCnt, addr.String())
+		user.CallCnt = 0
+	}
+	InputProcess(server, addr, ph)
+	/*
+		cs := GetUC().Channels[user.GameRoomId]
+		for i := range cs.Players {
+			u := GetUC().Users[i]
+			p := Protocol{}
+			p.header.MessageType = 0x13
+			p.data = append(p.data, 0)
+			p.data = append(p.data, ph.data[1])
+			u.SendPacket(server, p)
+		}*/
+}
+func InputProcess(server net.PacketConn, addr net.Addr, ph Protocol) {
+	user := GetUC().Users[addr.String()]
+	user.RequireFrame += 1
+	bb := make([]byte, 0)
+	cs := GetUC().Channels[user.GameRoomId]
+	log.Infof("[InputProc] gameid: %d", user.GameRoomId)
+	for i := range cs.Players {
+		u := GetUC().Users[i]
+		bb = append(bb, u.Inputs...)
+	}
+	log.Infof("[InputProc] %+v, %s", bb, addr.String())
+	for i := range cs.Players {
+		u := GetUC().Users[i]
+		// 1 은 랜 기준
+		if u.RequireFrame >= 1 {
+			u.RequireFrame = 0
+			if v, ok := u.OutcomingHitCache[string(bb)]; ok {
+				log.Infof("[InputProc] hit! %s", addr.String())
+				p := Protocol{}
+				// game cache
+				p.header.MessageType = 0x13
+				p.data = append(p.data, 0)
+				p.data = append(p.data, v)
+				u.SendPacket(server, p)
+			} else {
+				log.Infof("[InputProc] no hit! %s", addr.String())
+				p := Protocol{}
+				// game data
+				p.header.MessageType = 0x12
+				p.data = append(p.data, 0)
+				p.data = append(p.data, Uint16ToBytes(uint16(len(bb)))...)
+				p.data = append(p.data, bb...)
+				u.SendPacket(server, p)
+				u.OutcomingGameCache[u.OutcomingCachePosition] = bb
+				u.OutcomingHitCache[string(bb)] = u.OutcomingCachePosition
+				u.OutcomingCachePosition += 1
+			}
+		}
+	}
 }
 func SvcDropGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 	log.Infof("================ SvcDropGame ===============")

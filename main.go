@@ -16,7 +16,12 @@ var log = logrus.New()
 func init() {
 	// logrus.For
 	// log.Formatter = new(prefixed.TextFormatter)
-	log.Level = logrus.DebugLevel
+	log.Level = logrus.InfoLevel
+	Formatter := new(logrus.TextFormatter)
+	Formatter.TimestampFormat = "2006-01-02T15:04:05.999999999Z07:00"
+	Formatter.FullTimestamp = true
+	log.SetFormatter(Formatter)
+	// 2006-01-02T15:04:05.999999999Z07:00
 }
 
 type ProtocolPackets struct {
@@ -89,7 +94,7 @@ func MakeProcServer() net.Addr {
 			if err != nil {
 				continue
 			}
-			fmt.Printf("<== received: %+v ( %s ) / %s / %s\n", buf[:n], string(buf[:n]), "from", clientAddress)
+			// fmt.Printf("<== received: %+v ( %s ) / %s / %s\n", buf[:n], string(buf[:n]), "from", clientAddress)
 			ph := ProtocolPackets{}
 			buf2 := bytes.NewBuffer(buf[:ProtocolPacketsSize])
 			err = binary.Read(buf2, binary.LittleEndian, &ph)
@@ -106,7 +111,7 @@ func MakeProcServer() net.Addr {
 					if user != nil {
 						userSeq = user.CurSeq
 					}
-					log.Infof("<<<<<<<<<<<<< recovery: want seq: %d ", userSeq+1)
+					log.Debugf("<<<<<<<<<<<<< recovery: want seq: %d ", userSeq+1)
 					for _, j := range messages {
 						if int(j.header.Seq) == userSeq+1 {
 							msgtype = j
@@ -119,7 +124,7 @@ func MakeProcServer() net.Addr {
 						}
 						// log.Infof("seq: %d", j.header.Seq)
 					}
-					log.Infof("recovery >>>>>>>>>>>>>>> ")
+					log.Debugf("recovery >>>>>>>>>>>>>>> ")
 					if match {
 						processCount += 1
 						if msgtype.header.MessageType == 0x01 {
@@ -154,11 +159,13 @@ func MakeProcServer() net.Addr {
 							SvcGameCache(server, clientAddress, msgtype)
 						} else if msgtype.header.MessageType == 0x14 {
 							SvcDropGame(server, clientAddress, msgtype)
+						} else if msgtype.header.MessageType == 0x15 {
+							SvcReadyToPlaySignal(server, clientAddress, msgtype)
 						} else {
 							log.Infof("unknown Message[%2x]: %+v", msgtype.header.MessageType, msgtype)
 						}
 					} else {
-						log.Infof("match finish, proc count: %d", processCount)
+						// log.Infof("match finish, proc count: %d", processCount)
 						break
 					}
 
