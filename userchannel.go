@@ -42,6 +42,11 @@ func (u *UserStruct) ResetOutcoming() {
 	u.OutcomingCachePosition = 0
 	u.OutcomingGameCache = map[uint8][]byte{}
 	u.OutcomingHitCache = map[string]uint8{}
+	u.Inputs = make([]byte, 0)
+
+	u.CachePosition = 0
+	u.IncomingGameData = map[uint8][]byte{}
+	u.RequireFrame = 0
 }
 
 func NewUserStruct() *UserStruct {

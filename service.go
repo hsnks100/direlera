@@ -166,7 +166,6 @@ func SvcCreateGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 	GetUC().AddChannel(cs.GameId, cs)
 	// update game status
 	for _, u := range GetUC().Users {
-
 		p := Protocol{}
 		p.header.Seq = uint16(u.SendCount)
 		p.header.MessageType = 0x0E
@@ -458,13 +457,13 @@ func SvcGameCache(server net.PacketConn, addr net.Addr, ph Protocol) {
 	}
 	cachePosition := ph.data[1]
 	user := GetUC().Users[addr.String()]
-	log.Infof("require cache pos: %d", cachePosition)
+	// log.Infof("require cache pos: %d", cachePosition)
 	if _, ok := user.IncomingGameData[cachePosition]; !ok {
-		log.Infof("%d player: cache create %+v", user.RoomOrder, user.Inputs)
+		// log.Infof("%d player: cache create %+v", user.RoomOrder, user.Inputs)
 		user.IncomingGameData[cachePosition] = user.Inputs
 	} else {
 		user.Inputs = user.IncomingGameData[cachePosition]
-		log.Infof("%d player: match cache %+v", user.RoomOrder, user.Inputs)
+		// log.Infof("%d player: match cache %+v", user.RoomOrder, user.Inputs)
 		if bytes.Compare(user.Inputs, user.IncomingGameData[cachePosition]) == 0 {
 
 		} else {
@@ -475,7 +474,7 @@ func SvcGameCache(server net.PacketConn, addr net.Addr, ph Protocol) {
 	ms := now.UnixNano() / 1000 / 1000
 	if ms-user.CallCntTime >= 1000 {
 		user.CallCntTime = ms
-		log.Infof("fps: %d, %s", user.CallCnt, addr.String())
+		// log.Infof("fps: %d, %s", user.CallCnt, addr.String())
 		user.CallCnt = 0
 	}
 	InputProcess(server, addr, ph)
@@ -495,19 +494,19 @@ func InputProcess(server net.PacketConn, addr net.Addr, ph Protocol) {
 	user.RequireFrame += 1
 	bb := make([]byte, 0)
 	cs := GetUC().Channels[user.GameRoomId]
-	log.Infof("[InputProc] gameid: %d", user.GameRoomId)
+	// log.Infof("[InputProc] gameid: %d", user.GameRoomId)
 	for i := range cs.Players {
 		u := GetUC().Users[i]
 		bb = append(bb, u.Inputs...)
 	}
-	log.Infof("[InputProc] %+v, %s", bb, addr.String())
+	// log.Infof("[InputProc] %+v, %s", bb, addr.String())
 	for i := range cs.Players {
 		u := GetUC().Users[i]
 		// 1 은 랜 기준
 		if u.RequireFrame >= 1 {
 			u.RequireFrame = 0
 			if v, ok := u.OutcomingHitCache[string(bb)]; ok {
-				log.Infof("[InputProc] hit! %s", addr.String())
+				// log.Infof("[InputProc] hit! %s", addr.String())
 				p := Protocol{}
 				// game cache
 				p.header.MessageType = 0x13
@@ -532,4 +531,34 @@ func InputProcess(server net.PacketConn, addr net.Addr, ph Protocol) {
 }
 func SvcDropGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 	log.Infof("================ SvcDropGame ===============")
+	if len(ph.data) != 2 {
+		return
+	}
+	if ph.data[0] != 0 || ph.data[1] != 0 {
+		return
+	}
+	user := GetUC().Users[addr.String()]
+	cs := GetUC().Channels[user.GameRoomId]
+	cs.GameStatus = 0
+	for _, u := range GetUC().Users {
+		p := Protocol{}
+		p.header.Seq = uint16(u.SendCount)
+		p.header.MessageType = 0x0E
+		p.data = append(p.data, 0)
+		p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
+		p.data = append(p.data, cs.GameStatus)
+		p.data = append(p.data, uint8(len(cs.Players)))
+		p.data = append(p.data, 4)
+		u.SendPacket(server, p)
+	}
+	for i := range cs.Players {
+		u := GetUC().Users[i]
+		p := Protocol{}
+		// game data
+		p.header.MessageType = 0x14
+		p.data = append(p.data, []byte(user.Name+"\x00")...)
+		p.data = append(p.data, byte(user.RoomOrder))
+		u.SendPacket(server, p)
+	}
+	log.Infof("================ SvcDropGame Ok ===============")
 }
