@@ -203,7 +203,6 @@ func MakeUDPServer() net.Addr {
 	return server.LocalAddr()
 }
 func main() {
-
 	log.SetReportCaller(true)
 
 	for i, j := range GetUC().Users {
