@@ -22,30 +22,29 @@ type UserStruct struct {
 	CurSeq       int
 	GameRoomId   uint32
 	RoomOrder    int
-	Inputs       []byte
+	Inputs       [][]byte
 	Packets      []Protocol // 보낸 패킷들
 	CallCnt      int
 	CallCntTime  int64
 	LastInput    []byte
 
-	CachePosition    uint8
-	IncomingGameData map[uint8][]byte
-	IncomingHitCache map[string]uint8
-	RequireFrame     int
+	cacheSystem *CacheSystem
+	// CachePosition    uint8
+	// IncomingGameData map[uint8][]byte
+	// IncomingHitCache map[string]uint8
+	RequireFrame int
 	// 보내기전에 HitCache 에 조회해보고 있으면 value 보내고
 	//                                   없으면 GameData 보냄.
 }
 
 func (u *UserStruct) ResetOutcoming() {
-	u.Inputs = make([]byte, 0)
-
-	u.CachePosition = 0
-	u.IncomingGameData = map[uint8][]byte{}
+	u.Inputs = make([][]byte, 0)
+	u.cacheSystem.Reset()
 	u.RequireFrame = 0
 }
 
 func NewUserStruct() *UserStruct {
-	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0, Inputs: make([]byte, 0), IncomingGameData: map[uint8][]byte{}, LastInput: []byte{}}
+	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0, Inputs: make([][]byte, 0), cacheSystem: NewCacheSystem(), LastInput: []byte{}}
 }
 
 func (u *UserStruct) SendPacket(server net.PacketConn, p Protocol) {
@@ -65,18 +64,15 @@ type ChannelStruct struct {
 	EmulName  string
 	CreatorId string
 	// players 는 입장 순서가 매우 중요함. 입력값 요동 안치게 하려면...-_-
-	Players       []string // map[string]struct{}
-	GameStatus    uint8
-	CachePosition int
+	Players    []string // map[string]struct{}
+	GameStatus uint8
 
-	OutcomingGameCache     map[uint8][]byte
-	OutcomingHitCache      map[string]uint8
-	OutcomingCachePosition uint8
+	cacheSystem *CacheSystem
 }
 
 func NewChannelStruct() *ChannelStruct {
 	return &ChannelStruct{Players: []string{},
-		OutcomingGameCache: map[uint8][]byte{}, OutcomingHitCache: map[string]uint8{},
+		cacheSystem: NewCacheSystem(),
 	} //map[string]struct{}{}}
 }
 

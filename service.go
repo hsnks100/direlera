@@ -371,7 +371,7 @@ func SvcStartGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 			p := Protocol{}
 			p.header.MessageType = 0x11
 			p.data = append(p.data, 0)
-			p.data = append(p.data, Uint16ToBytes(5)...)
+			p.data = append(p.data, Uint16ToBytes(1)...)
 			p.data = append(p.data, order+1)
 			tt := len(cs.Players)
 			p.data = append(p.data, byte(tt))
@@ -421,9 +421,15 @@ func SvcGameData(server net.PacketConn, addr net.Addr, ph Protocol) {
 	if len(ph.data) < 3+int(gameDataLength) {
 		return
 	}
-	// gameData := ph.data[3 : 3+gameDataLength]
-	// user := GetUC().Users[addr.String()]
-
+	gameData := ph.data[3 : 3+gameDataLength]
+	user := GetUC().Users[addr.String()]
+	user.Inputs = append(user.Inputs, gameData)
+	// user.Inputs = gameData
+	user.cacheSystem.PutData(gameData)
+	if len(user.Inputs) != 0 {
+		fmt.Println("선입력 처리 중: %d.", len(user.Inputs))
+	}
+	InputProcess2(server, addr, ph)
 }
 
 var beforeCache []byte = make([]byte, 0)
@@ -436,51 +442,106 @@ func SvcGameCache(server net.PacketConn, addr net.Addr, ph Protocol) {
 	if len(ph.data) != 2 {
 		return
 	}
-	// cachePosition := ph.data[1]
+	cachePosition := ph.data[1]
+	user := GetUC().Users[addr.String()]
+	inputData, err := user.cacheSystem.GetData(cachePosition)
+	if err != nil {
+		fmt.Println("no cache")
+		return
+	}
+	if len(user.Inputs) != 0 {
+		fmt.Println("선입력 처리 중: %d.", len(user.Inputs))
+	}
+	user.Inputs = append(user.Inputs, inputData)
+	InputProcess2(server, addr, ph)
 
 }
-func InputProcess(server net.PacketConn, addr net.Addr, ph Protocol) {
+func InputProcess2(server net.PacketConn, addr net.Addr, ph Protocol) {
 	user := GetUC().Users[addr.String()]
-	user.RequireFrame += 1
 	bb := make([]byte, 0)
 	cs := GetUC().Channels[user.GameRoomId]
 	// log.Infof("[InputProc] gameid: %d", user.GameRoomId)
 	for _, j := range cs.Players {
 		u := GetUC().Users[j]
-		bb = append(bb, u.Inputs...)
+		if len(u.Inputs) == 0 {
+			// fmt.Println("not yet...??")
+			return // not yet...
+		}
+		input := u.Inputs[0]
+		bb = append(bb, input...)
 	}
-	// log.Infof("[InputProc] %+v, %s", bb, addr.String())
-	for _, j := range cs.Players {
-		u := GetUC().Users[j]
-		// 1 은 랜 기준
-		if u.RequireFrame >= 1 {
-			u.RequireFrame = 0
-			if v, ok := cs.OutcomingHitCache[string(bb)]; ok {
-				// log.Infof("[InputProc] hit! %s", addr.String())
-				p := Protocol{}
-				// game cache
-				p.header.MessageType = 0x13
-				p.data = append(p.data, 0)
-				p.data = append(p.data, v)
-				u.SendPacket(server, p)
-				log.Infof("[GAMECACHE] SEND")
-			} else {
-				log.Infof("[InputProc] no hit! %s", addr.String())
-				p := Protocol{}
-				// game data
-				p.header.MessageType = 0x12
-				p.data = append(p.data, 0)
-				p.data = append(p.data, Uint16ToBytes(uint16(len(bb)))...)
-				p.data = append(p.data, bb...)
-				u.SendPacket(server, p)
-				log.Infof("[GAMEDATA] SEND")
-				cs.OutcomingGameCache[cs.OutcomingCachePosition] = bb
-				cs.OutcomingHitCache[string(bb)] = cs.OutcomingCachePosition
-				cs.OutcomingCachePosition += 1
-			}
+
+	// 보낼 데이터가 캐시에 있는가?
+	cachePos, err := cs.cacheSystem.GetCachePosition(bb)
+	if err != nil {
+		cs.cacheSystem.PutData(bb)
+		p := Protocol{}
+		p.header.MessageType = 0x12
+		p.data = append(p.data, 0)
+		p.data = append(p.data, Uint16ToBytes(uint16(len(bb)))...)
+		p.data = append(p.data, bb...)
+		for _, j := range cs.Players {
+			u := GetUC().Users[j]
+			u.SendPacket(server, p)
+			u.Inputs = u.Inputs[1:]
+			// u.Inputs = []byte{}
+		}
+	} else {
+		p := Protocol{}
+		// game cache
+		p.header.MessageType = 0x13
+		p.data = append(p.data, 0)
+		p.data = append(p.data, cachePos)
+		for _, j := range cs.Players {
+			u := GetUC().Users[j]
+			u.SendPacket(server, p)
+			u.Inputs = u.Inputs[1:]
 		}
 	}
 }
+
+// func InputProcess(server net.PacketConn, addr net.Addr, ph Protocol) {
+// 	user := GetUC().Users[addr.String()]
+// 	user.RequireFrame += 1
+// 	bb := make([]byte, 0)
+// 	cs := GetUC().Channels[user.GameRoomId]
+// 	// log.Infof("[InputProc] gameid: %d", user.GameRoomId)
+// 	for _, j := range cs.Players {
+// 		u := GetUC().Users[j]
+// 		bb = append(bb, u.Inputs...)
+// 	}
+// 	// log.Infof("[InputProc] %+v, %s", bb, addr.String())
+// 	for _, j := range cs.Players {
+// 		u := GetUC().Users[j]
+// 		// 1 은 랜 기준
+// 		if u.RequireFrame >= 1 {
+// 			u.RequireFrame = 0
+// 			if v, ok := cs.OutcomingHitCache[string(bb)]; ok {
+// 				// log.Infof("[InputProc] hit! %s", addr.String())
+// 				p := Protocol{}
+// 				// game cache
+// 				p.header.MessageType = 0x13
+// 				p.data = append(p.data, 0)
+// 				p.data = append(p.data, v)
+// 				u.SendPacket(server, p)
+// 				log.Infof("[GAMECACHE] SEND")
+// 			} else {
+// 				log.Infof("[InputProc] no hit! %s", addr.String())
+// 				p := Protocol{}
+// 				// game data
+// 				p.header.MessageType = 0x12
+// 				p.data = append(p.data, 0)
+// 				p.data = append(p.data, Uint16ToBytes(uint16(len(bb)))...)
+// 				p.data = append(p.data, bb...)
+// 				u.SendPacket(server, p)
+// 				log.Infof("[GAMEDATA] SEND")
+// 				cs.OutcomingGameCache[cs.OutcomingCachePosition] = bb
+// 				cs.OutcomingHitCache[string(bb)] = cs.OutcomingCachePosition
+// 				cs.OutcomingCachePosition += 1
+// 			}
+// 		}
+// 	}
+// }
 func SvcDropGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 	log.Infof("================ SvcDropGame ===============")
 	if len(ph.data) != 2 {

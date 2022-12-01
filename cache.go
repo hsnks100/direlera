@@ -14,6 +14,19 @@ func NewCacheSystem() *CacheSystem {
 	return &CacheSystem{IncomingData: map[uint8][]byte{},
 		IncomingHitCache: map[string]uint8{}}
 }
+
+func (c *CacheSystem) Reset() {
+	c.Position = 0
+	c.IncomingData = map[uint8][]byte{}
+	c.IncomingHitCache = map[string]uint8{}
+}
+func (c *CacheSystem) GetCachePosition(b []byte) (uint8, error) {
+	if v, ok := c.IncomingHitCache[string(b)]; ok {
+		return v, nil
+	} else {
+		return 0, errors.New("no cache")
+	}
+}
 func (c *CacheSystem) PutData(b []byte) uint8 {
 	if v, ok := c.IncomingHitCache[string(b)]; ok {
 		return v
