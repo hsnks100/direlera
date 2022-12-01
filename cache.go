@@ -1,6 +1,9 @@
 package main
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // 인풋 []byte 에 대해 uint8 로 접근 할 수 있게 하는 시스템
 
@@ -34,6 +37,9 @@ func (c *CacheSystem) PutData(b []byte) uint8 {
 		c.IncomingData[c.Position] = b
 		c.IncomingHitCache[string(b)] = c.Position
 		c.Position++
+		if c.Position >= 250 {
+			fmt.Printf("cache 위험~~: %d", c.Position)
+		}
 		return c.Position - 1
 	}
 }
