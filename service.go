@@ -365,6 +365,7 @@ func SvcStartGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 			u.SendPacket(server, p)
 		}
 		for _, j := range cs.Players {
+
 			order += 1
 			u := GetUC().Users[j]
 			u.RoomOrder = int(order)
@@ -372,7 +373,8 @@ func SvcStartGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 			p.header.MessageType = 0x11
 			p.data = append(p.data, 0)
 			p.data = append(p.data, Uint16ToBytes(1)...)
-			p.data = append(p.data, order+1)
+			p.data = append(p.data, order)
+			u.PlayerOrder = int(order)
 			tt := len(cs.Players)
 			p.data = append(p.data, byte(tt))
 			u.ResetOutcoming()
@@ -423,20 +425,22 @@ func SvcGameData(server net.PacketConn, addr net.Addr, ph Protocol) {
 	}
 	gameData := ph.data[3 : 3+gameDataLength]
 	user := GetUC().Users[addr.String()]
-	user.Inputs = append(user.Inputs, gameData)
 	// user.Inputs = gameData
 	user.cacheSystem.PutData(gameData)
-	if len(user.Inputs) != 0 {
-		fmt.Println("선입력 처리 중: %d.", len(user.Inputs))
+
+	cs := GetUC().Channels[user.GameRoomId]
+	for _, j := range cs.Players {
+		u := GetUC().Users[j]
+		u.PlayersInput[user.PlayerOrder-1] = append(u.PlayersInput[user.PlayerOrder-1], gameData...)
+		// fmt.Printf("insert gameData player: %d, playername: %s, %+v, total length: %d\n", user.PlayerOrder-1, user.Name, gameData, len(u.PlayersInput[user.PlayerOrder-1]))
 	}
+
 	InputProcess2(server, addr, ph)
 }
 
 func SvcGameCache(server net.PacketConn, addr net.Addr, ph Protocol) {
-	if ph.data[0] != 0x00 || ph.data[1] != 0x00 {
-		// log.Infof("================ SvcGameCache ===============")
-		// fmt.Println(hex.Dump(ph.data))
-	}
+	// log.Infof("================ SvcGameCache ===============")
+	// fmt.Println(hex.Dump(ph.data))
 	if len(ph.data) != 2 {
 		return
 	}
@@ -447,85 +451,85 @@ func SvcGameCache(server net.PacketConn, addr net.Addr, ph Protocol) {
 		fmt.Println("no cache")
 		return
 	}
-	if len(user.Inputs) != 0 {
-		fmt.Println("선입력 처리 중: %d.", len(user.Inputs))
+	cs := GetUC().Channels[user.GameRoomId]
+	for _, j := range cs.Players {
+		u := GetUC().Users[j]
+		u.PlayersInput[user.PlayerOrder-1] = append(u.PlayersInput[user.PlayerOrder-1], inputData...)
+		// fmt.Printf("cache insert gameData player: %d, playername: %s, %+v, total length: %d\n", user.PlayerOrder-1, user.Name, inputData, len(u.PlayersInput[user.PlayerOrder-1]))
 	}
-	user.Inputs = append(user.Inputs, inputData)
 	InputProcess2(server, addr, ph)
 
 }
 
-func split(buf []byte, lim int) [][]byte {
-	var chunk []byte
-	chunks := make([][]byte, 0, len(buf)/lim+1)
-	for len(buf) >= lim {
-		chunk, buf = buf[:lim], buf[lim:]
-		chunks = append(chunks, chunk)
+func genInput(cs *ChannelStruct, user *UserStruct) []byte {
+	allInput := true
+	requireBytes := int(user.ConnectType) * 2
+	for i := 0; i < len(cs.Players); i++ {
+		if len(user.PlayersInput[i]) < requireBytes {
+			// fmt.Printf("player [%d]'s input: %+v\n", i, user.PlayersInput[i])
+			allInput = false
+			break
+		}
 	}
-	if len(buf) > 0 {
-		chunks = append(chunks, buf[:len(buf)])
+	if !allInput {
+		return nil
 	}
-	return chunks
+	totalSplits := [][][]byte{}
+	for i := 0; i < len(cs.Players); i++ {
+		s := split(user.PlayersInput[i][:requireBytes], 2)
+		totalSplits = append(totalSplits, s)
+		user.PlayersInput[i] = user.PlayersInput[i][requireBytes:]
+	}
+	totalSum := []byte{}
+	if allInput {
+		for {
+			for i := 0; i < len(totalSplits); i++ {
+				j := totalSplits[i]
+				totalSum = append(totalSum, j[0]...)
+				totalSplits[i] = j[1:]
+			}
+			allzero := true
+			for i := 0; i < len(totalSplits); i++ {
+				if len(totalSplits[i]) != 0 {
+					allzero = false
+					break
+				}
+			}
+			if allzero {
+				break
+			}
+		}
+	} else {
+		return nil
+	}
+	return totalSum
 }
 func InputProcess2(server net.PacketConn, addr net.Addr, ph Protocol) {
 	user := GetUC().Users[addr.String()]
 	cs := GetUC().Channels[user.GameRoomId]
-	// log.Infof("[InputProc] gameid: %d", user.GameRoomId)
-	totalSplits := [][][]byte{}
+	// 각 플레이어마다 커넥션  타입에 맞게 패킷 생성해야함.
 	for _, j := range cs.Players {
 		u := GetUC().Users[j]
-		if len(u.Inputs) == 0 {
-			// fmt.Println("not yet...??")
-			return // not yet...
-		}
-		input := u.Inputs[0]
-		s := split(input, 2)
-		totalSplits = append(totalSplits, s)
-	}
-	totalSum := []byte{}
-	for {
-		for i := 0; i < len(totalSplits); i++ {
-			j := totalSplits[i]
-			totalSum = append(totalSum, j[0]...)
-			totalSplits[i] = j[1:]
-		}
-		allzero := true
-		for i := 0; i < len(totalSplits); i++ {
-			if len(totalSplits[i]) != 0 {
-				allzero = false
-				break
+		sendData := genInput(cs, u)
+		if len(sendData) > 0 {
+			// 보낼 데이터가 캐시에 있는가?
+			cachePos, err := u.putCache.GetCachePosition(sendData)
+			if err != nil {
+				u.putCache.PutData(sendData)
+				p := Protocol{}
+				p.header.MessageType = 0x12
+				p.data = append(p.data, 0)
+				p.data = append(p.data, Uint16ToBytes(uint16(len(sendData)))...)
+				p.data = append(p.data, sendData...)
+				u.SendPacket(server, p)
+			} else {
+				p := Protocol{}
+				// game cache
+				p.header.MessageType = 0x13
+				p.data = append(p.data, 0)
+				p.data = append(p.data, cachePos)
+				u.SendPacket(server, p)
 			}
-		}
-		if allzero {
-			break
-		}
-	}
-
-	// 보낼 데이터가 캐시에 있는가?
-	cachePos, err := cs.cacheSystem.GetCachePosition(totalSum)
-	if err != nil {
-		cs.cacheSystem.PutData(totalSum)
-		p := Protocol{}
-		p.header.MessageType = 0x12
-		p.data = append(p.data, 0)
-		p.data = append(p.data, Uint16ToBytes(uint16(len(totalSum)))...)
-		p.data = append(p.data, totalSum...)
-		for _, j := range cs.Players {
-			u := GetUC().Users[j]
-			u.SendPacket(server, p)
-			u.Inputs = u.Inputs[1:]
-			// u.Inputs = []byte{}
-		}
-	} else {
-		p := Protocol{}
-		// game cache
-		p.header.MessageType = 0x13
-		p.data = append(p.data, 0)
-		p.data = append(p.data, cachePos)
-		for _, j := range cs.Players {
-			u := GetUC().Users[j]
-			u.SendPacket(server, p)
-			u.Inputs = u.Inputs[1:]
 		}
 	}
 }
@@ -562,4 +566,17 @@ func SvcDropGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 		u.SendPacket(server, p)
 	}
 	log.Infof("================ SvcDropGame Ok ===============")
+}
+
+func split(buf []byte, lim int) [][]byte {
+	var chunk []byte
+	chunks := make([][]byte, 0, len(buf)/lim+1)
+	for len(buf) >= lim {
+		chunk, buf = buf[:lim], buf[lim:]
+		chunks = append(chunks, chunk)
+	}
+	if len(buf) > 0 {
+		chunks = append(chunks, buf[:len(buf)])
+	}
+	return chunks
 }

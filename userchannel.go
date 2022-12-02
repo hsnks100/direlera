@@ -22,13 +22,15 @@ type UserStruct struct {
 	CurSeq       int
 	GameRoomId   uint32
 	RoomOrder    int
-	Inputs       [][]byte
 	Packets      []Protocol // 보낸 패킷들
 	CallCnt      int
 	CallCntTime  int64
 	LastInput    []byte
 
-	cacheSystem *CacheSystem
+	PlayerOrder  int
+	PlayersInput [][]byte
+	cacheSystem  *CacheSystem
+	putCache     *CacheSystem
 	// CachePosition    uint8
 	// IncomingGameData map[uint8][]byte
 	// IncomingHitCache map[string]uint8
@@ -38,13 +40,16 @@ type UserStruct struct {
 }
 
 func (u *UserStruct) ResetOutcoming() {
-	u.Inputs = make([][]byte, 0)
 	u.cacheSystem.Reset()
 	u.RequireFrame = 0
 }
 
 func NewUserStruct() *UserStruct {
-	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0, Inputs: make([][]byte, 0), cacheSystem: NewCacheSystem(), LastInput: []byte{}}
+	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0, cacheSystem: NewCacheSystem(), LastInput: []byte{},
+		// malloc memory up to 32 players
+		PlayersInput: make([][]byte, 32),
+		putCache:     NewCacheSystem(),
+	}
 }
 
 func (u *UserStruct) SendPacket(server net.PacketConn, p Protocol) {
@@ -67,13 +72,12 @@ type ChannelStruct struct {
 	Players    []string // map[string]struct{}
 	GameStatus uint8
 
-	cacheSystem *CacheSystem
+	// cacheSystem *CacheSystem
 }
 
 func NewChannelStruct() *ChannelStruct {
-	return &ChannelStruct{Players: []string{},
-		cacheSystem: NewCacheSystem(),
-	} //map[string]struct{}{}}
+	return &ChannelStruct{Players: []string{}} // cacheSystem: NewCacheSystem(),
+	//map[string]struct{}{}}
 }
 
 type UserChannel struct {
