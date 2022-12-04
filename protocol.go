@@ -10,6 +10,38 @@ type ProtocolPackets struct {
 }
 
 const (
+	MessageTypeUserQuit          = iota + 1
+	MessageTypeUserJoin          = 2
+	MessageTypeUserLoginInfo     = 3
+	MessageTypeUserServerStatus  = 4
+	MessageTypeS2CAck            = 5
+	MessageTypeC2SAck            = 6
+	MessageTypeGlobalChat        = 7
+	MessageTypeGameChat          = 8
+	MessageTypeKeepalive         = 9
+	MessageTypeCreateGame        = 0xa
+	MessageTypeQuitGame          = 0xb
+	MessageTypeJoinGame          = 0xc
+	MessageTypePlayerInfo        = 0xd
+	MessageTypeUpdateGameStatus  = 0x0e
+	MessageTypeKickUserFromGame  = 0xf
+	MessageTypeCloseGame         = 0x10
+	MessageTypeStartGame         = 0x11
+	MessageTypeGameData          = 0x12
+	MessageTypeGameCache         = 0x13
+	MessageTypeDropGame          = 0x14
+	MessageTypeReadyToPlaySignal = 0x15
+	MessageTypeConnectionReject  = 0x16
+	MessageTypeServerInfo        = 0x17
+
+	GameStatusWaiting = 0
+	GameStatusPlaying = 1
+	GameStatusNetSync = 2
+
+	PlayerStatusPlaying = 0
+	PlayerStatusIdle    = 1
+)
+const (
 	ProtocolPacketsSize = 1
 	ProtocolBodySize    = 5
 )
@@ -25,6 +57,12 @@ type Protocol struct {
 	data   []byte
 }
 
+func NewProtocol(messageType uint8, data []byte) *Protocol {
+	send := Protocol{}
+	send.header.MessageType = messageType
+	send.data = data
+	return &send
+}
 func (t *Protocol) MakePacket() []byte {
 	prob := ProtocolHeader{}
 	prob.Seq = t.header.Seq

@@ -7,30 +7,63 @@ go build
 ```
 
 # todo
-game list update... & user info update.
-
-기존 유저 목록들 정보 이상하게 나옴. 왜 그러지?
-
-방닫을 때 방 정리하기.
 
 
-# Special Thank you
-
-서영철(osio)
 
 
-# wireshark
 
-filter: ip.addr == 220.85.140.51
+
 # packet structure
 
-```
-N
-   seq1[2] length[2] msg_type [DATA]
-   seq0[2] length[2] msg_type [DATA] ...
+wireshark kaillera 분석용 lua plugin
 
-   length 는 msg_type 을 포함한 길이.
+```lua
+local proto_kaillera = Proto.new("kaillera", "Kaillera Protocol")
+
+local messages = ProtoField.uint8("kaillera.messages", "Messages", base.DEC)
+local msg_seq = ProtoField.uint16("kaillera.msg_seq", "Message Seqeunce", base.DEC)
+local message_length = ProtoField.uint16("kaillera.message_length", "len(message)", base.DEC)
+local message_type = ProtoField.uint8("kaillera.message_type", "Message Type", base.HEX)
+
+proto_kaillera.fields = {messages, msg_seq, message_length, message_type}
+
+function proto_kaillera.dissector(buffer, pinfo, tree)
+
+    subtree = tree:add(proto_kaillera, buffer(0))
+
+    local info = ""
+    subtree:add(messages, buffer(0, 1))
+    info = info .. "messages: " .. buffer(0, 1):uint() .. ", "
+    local index = 1
+    local i = 0
+    local comma = ""
+    -- local messageNum = buffer(0, 1):uint32()
+    for i = 0, buffer(0, 1):uint() - 1 do
+        subtree:add_le(msg_seq, buffer(index, 2))
+        info = string.format("%s%s [seq: %d, ", info, comma, buffer(index, 2):le_uint())
+        index = index + 2
+        subtree:add_le(message_length, buffer(index, 2))
+        local messageLength = buffer(index, 2):le_uint()
+        index = index + 2
+        subtree:add(message_type, buffer(index, 1))
+        info = string.format("%s message_type: %x]", info, buffer(index, 1):uint())
+        index = index + 1
+        index = index + messageLength - 1
+        comma = ", "
+    end
+
+    local ml = buffer(3, 2):le_uint()
+    pinfo.cols.info = info .. " / " .. "[" .. pinfo.src_port .. "->" .. pinfo.dst_port .. "]"
+end
+
+
+local function heuristic_checker(buffer, pinfo, tree)
+    proto_kaillera.dissector(buffer, pinfo, tree)
+end
+
+proto_kaillera:register_heuristic("udp", heuristic_checker)
 ```
+
 # packet spec
 
 ```
@@ -360,3 +393,7 @@ Notification [0x15]
 'Server: User Quit Notification [0x01]
 ```
 
+
+# Special Thank you
+
+서영철(osio)

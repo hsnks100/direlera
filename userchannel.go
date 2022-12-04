@@ -24,7 +24,6 @@ type UserStruct struct {
 	Packets      []Protocol // 보낸 패킷들
 	CallCnt      int
 	CallCntTime  int64
-	LastInput    []byte
 
 	PlayerOrder  int
 	PlayersInput [][]byte
@@ -39,10 +38,12 @@ type UserStruct struct {
 
 func (u *UserStruct) ResetOutcoming() {
 	u.cacheSystem.Reset()
+	u.putCache.Reset()
+	u.PlayersInput = make([][]byte, 32)
 }
 
 func NewUserStruct() *UserStruct {
-	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0, cacheSystem: NewCacheSystem(), LastInput: []byte{},
+	return &UserStruct{Packets: make([]Protocol, 0), CurSeq: 0, cacheSystem: NewCacheSystem(),
 		// malloc memory up to 32 players
 		PlayersInput: make([][]byte, 32),
 		putCache:     NewCacheSystem(),
@@ -81,6 +82,16 @@ type ChannelStruct struct {
 func NewChannelStruct() *ChannelStruct {
 	return &ChannelStruct{Players: []string{}} // cacheSystem: NewCacheSystem(),
 	//map[string]struct{}{}}
+}
+
+func (cs *ChannelStruct) PlayerCount() int {
+	cnt := 0
+	for _, j := range cs.Players {
+		if j != "" {
+			cnt++
+		}
+	}
+	return cnt
 }
 
 type UserChannel struct {

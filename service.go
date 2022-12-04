@@ -69,7 +69,7 @@ func (s *Service) RunService() {
 							s.userChannel.AddUser(clientAddress, NewUserStruct())
 							s.userChannel.NextUserId += 1
 							s.userChannel.Users[clientAddress.String()].UserId = s.userChannel.NextUserId
-							s.userChannel.Users[clientAddress.String()].PlayerStatus = 1
+							s.userChannel.Users[clientAddress.String()].PlayerStatus = PlayerStatusIdle
 							s.SvcUserLogin(server, clientAddress, msgtype) // , rawdata[:])
 						} else if msgtype.header.MessageType == 0x06 {
 							s.SvcAck(server, clientAddress, msgtype) // , rawdata[:])
@@ -129,17 +129,8 @@ func (s *Service) SvcUserLogin(server net.PacketConn, addr net.Addr, ph Protocol
 	user.EmulName = string(fields[1])
 	log.Infof("svcuserlogin conntype : %+v", fields[2])
 	user.ConnectType = fields[2][0]
-
 	v3 := MakeServerAck()
-	send := Protocol{}
-	send.header.MessageType = 0x05
-	send.header.Seq = 0
-	send.data = v3
-	packet := make([]byte, 0)
-	packet = append(packet, 1) // N = 1
-	packet = append(packet, send.MakePacket()...)
-	fmt.Printf("%s\n", hex.Dump(packet))
-	user.SendPacket(server, send)
+	user.SendPacket(server, *NewProtocol(MessageTypeS2CAck, v3))
 }
 
 func (s *Service) SvcAck(server net.PacketConn, addr net.Addr, ph Protocol) { // Header, body []byte) {
@@ -148,11 +139,7 @@ func (s *Service) SvcAck(server net.PacketConn, addr net.Addr, ph Protocol) { //
 	log.Infof("user: %+v", user)
 	if user.SendCount <= 4 {
 		v3 := MakeServerAck()
-		send := Protocol{}
-		send.header.MessageType = 0x05
-		send.header.Seq = uint16(user.SendCount)
-		send.data = v3
-		user.SendPacket(server, send)
+		user.SendPacket(server, *NewProtocol(MessageTypeS2CAck, v3))
 
 	} else {
 		randomPing := uint32(rand.Intn(30))
@@ -164,26 +151,20 @@ func (s *Service) SvcAck(server net.PacketConn, addr net.Addr, ph Protocol) { //
 		// joined packet
 		{
 			for _, u := range s.userChannel.Users {
-				p := Protocol{}
-				p.header.Seq = uint16(u.SendCount)
-				p.header.MessageType = 0x02
-				p.data = make([]byte, 0)
-				p.data = append(p.data, []byte(user.Name+"\x00")...)
-				p.data = append(p.data, Uint16ToBytes(user.UserId)...)
-				p.data = append(p.data, Uint32ToBytes(user.Ping)...)
-				p.data = append(p.data, user.ConnectType)
-				u.SendPacket(server, p)
+				data := make([]byte, 0)
+				data = append(data, []byte(user.Name+"\x00")...)
+				data = append(data, Uint16ToBytes(user.UserId)...)
+				data = append(data, Uint32ToBytes(user.Ping)...)
+				data = append(data, user.ConnectType)
+				u.SendPacket(server, *NewProtocol(MessageTypeUserJoin, data))
 			}
 		}
 		// server info
 		{
-			p := Protocol{}
-			p.header.Seq = uint16(user.SendCount)
-			p.header.MessageType = 0x17
-			p.data = make([]byte, 0)
-			p.data = append(p.data, []byte("Server"+"\x00")...)
-			p.data = append(p.data, []byte("Dire's kaillera server^^"+"\x00")...)
-			user.SendPacket(server, p)
+			data := make([]byte, 0)
+			data = append(data, []byte("Server"+"\x00")...)
+			data = append(data, []byte("Dire's kaillera server^^"+"\x00")...)
+			user.SendPacket(server, *NewProtocol(MessageTypeServerInfo, data))
 		}
 
 	}
@@ -195,12 +176,10 @@ func (s *Service) SvcChatMesg(server net.PacketConn, addr net.Addr, ph Protocol)
 	user := s.userChannel.Users[addr.String()]
 	// chatmesg := ph.data[1:]
 	for _, u := range s.userChannel.Users {
-		p := Protocol{}
-		p.header.Seq = uint16(u.SendCount)
-		p.header.MessageType = 0x07
-		p.data = append(p.data, []byte(user.Name+"\x00")...)
-		p.data = append(p.data, ph.data[1:]...)
-		u.SendPacket(server, p)
+		data := make([]byte, 0)
+		data = append(data, []byte(user.Name+"\x00")...)
+		data = append(data, ph.data[1:]...)
+		u.SendPacket(server, *NewProtocol(MessageTypeGlobalChat, data))
 	}
 }
 func (s *Service) SvcGameChat(server net.PacketConn, addr net.Addr, ph Protocol) {
@@ -209,12 +188,12 @@ func (s *Service) SvcGameChat(server net.PacketConn, addr net.Addr, ph Protocol)
 	cs := s.userChannel.Channels[user.GameRoomId]
 	for _, j := range cs.Players {
 		u := s.userChannel.Users[j]
-		p := Protocol{}
-		p.header.Seq = uint16(u.SendCount)
-		p.header.MessageType = 0x08
-		p.data = append(p.data, []byte(user.Name+"\x00")...)
-		p.data = append(p.data, ph.data[1:]...)
-		u.SendPacket(server, p)
+		if u != nil {
+			data := make([]byte, 0)
+			data = append(data, []byte(user.Name+"\x00")...)
+			data = append(data, ph.data[1:]...)
+			u.SendPacket(server, *NewProtocol(MessageTypeGameChat, data))
+		}
 	}
 }
 
@@ -222,16 +201,14 @@ func (s *Service) SvcUserQuit(server net.PacketConn, addr net.Addr, ph Protocol)
 	log.Infof("================ SvcUserQuit ===============")
 	user := s.userChannel.Users[addr.String()]
 	clientMsg := ph.data[3:]
-
-	// chatmesg := ph.data[1:]
 	for _, u := range s.userChannel.Users {
-		p := Protocol{}
-		p.header.Seq = uint16(u.SendCount)
-		p.header.MessageType = 0x01
-		p.data = append(p.data, []byte(user.Name+"\x00")...)
-		p.data = append(p.data, Uint16ToBytes(user.UserId)...)
-		p.data = append(p.data, []byte(clientMsg)...)
-		u.SendPacket(server, p)
+		if u != nil {
+			data := make([]byte, 0)
+			data = append(data, []byte(user.Name+"\x00")...)
+			data = append(data, Uint16ToBytes(user.UserId)...)
+			data = append(data, []byte(clientMsg)...)
+			u.SendPacket(server, *NewProtocol(MessageTypeUserQuit, data))
+		}
 	}
 	delete(s.userChannel.Users, addr.String())
 }
@@ -246,15 +223,12 @@ func (s *Service) SvcCreateGame(server net.PacketConn, addr net.Addr, ph Protoco
 		log.Infof("SvcCreateGame %d: %s", i, j)
 	}
 	for _, u := range s.userChannel.Users {
-		p := Protocol{}
-		p.header.Seq = uint16(u.SendCount)
-		p.header.MessageType = 0x0A
-		p.data = append(p.data, []byte(u.Name+"\x00")...)
-		p.data = append(p.data, append(fields[1], 0)...)
-		p.data = append(p.data, []byte(u.EmulName+"\x00")...)
-		p.data = append(p.data, Uint32ToBytes(uint32(g_gameId))...) // Game id ??
-
-		u.SendPacket(server, p)
+		data := make([]byte, 0)
+		data = append(data, []byte(u.Name+"\x00")...)
+		data = append(data, append(fields[1], 0)...)
+		data = append(data, []byte(u.EmulName+"\x00")...)
+		data = append(data, Uint32ToBytes(uint32(g_gameId))...) // Game id ??
+		u.SendPacket(server, *NewProtocol(MessageTypeCreateGame, data))
 	}
 	cs := NewChannelStruct()
 	cs.CreatorId = user.Name
@@ -269,54 +243,45 @@ func (s *Service) SvcCreateGame(server net.PacketConn, addr net.Addr, ph Protoco
 	s.userChannel.AddChannel(cs.GameId, cs)
 	// update game status
 	for _, u := range s.userChannel.Users {
-		p := Protocol{}
-		p.header.Seq = uint16(u.SendCount)
-		p.header.MessageType = 0x0E
-		p.data = append(p.data, 0)
-		p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
-		p.data = append(p.data, cs.GameStatus)
-		p.data = append(p.data, uint8(len(cs.Players)))
-		p.data = append(p.data, 4)
-		u.SendPacket(server, p)
+		data := make([]byte, 0)
+		data = append(data, 0)
+		data = append(data, Uint32ToBytes(cs.GameId)...)
+		data = append(data, cs.GameStatus)
+		data = append(data, uint8(len(cs.Players)))
+		data = append(data, 4)
+		u.SendPacket(server, *NewProtocol(MessageTypeUpdateGameStatus, data))
 	}
 	// player info
-	{
-		p := Protocol{}
-		p.header.Seq = uint16(user.SendCount)
-		p.header.MessageType = 0x0D
-		p.data = append(p.data, 0)
-		p.data = append(p.data, Uint32ToBytes(uint32(len(cs.Players))-1)...)
-		for _, j := range cs.Players {
-			roomUser := s.userChannel.Users[j]
-			p.data = append(p.data, []byte(roomUser.Name+"\x00")...)
-			p.data = append(p.data, Uint32ToBytes(roomUser.Ping)...)
-			p.data = append(p.data, Uint16ToBytes(roomUser.UserId)...)
-			p.data = append(p.data, roomUser.ConnectType)
-		}
-		user.SendPacket(server, p)
-	}
+	// {
+	// 	data := make([]byte, 0)
+	// 	data = append(data, 0)
+	// 	data = append(data, Uint32ToBytes(uint32(len(cs.Players))-1)...)
+	// 	for _, j := range cs.Players {
+	// 		roomUser := s.userChannel.Users[j]
+	// 		data = append(data, []byte(roomUser.Name+"!\x00")...)
+	// 		data = append(data, Uint32ToBytes(roomUser.Ping)...)
+	// 		data = append(data, Uint16ToBytes(roomUser.UserId)...)
+	// 		data = append(data, roomUser.ConnectType)
+	// 	}
+	// 	user.SendPacket(server, *NewProtocol(MessageTypePlayerInfo, data))
+	// }
 	// Join Game Noti
 	for _, u := range s.userChannel.Users {
-		p := Protocol{}
-		p.header.Seq = uint16(u.SendCount)
-		p.header.MessageType = 0x0C
-		p.data = append(p.data, 0)
-		p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
-		p.data = append(p.data, []byte(user.Name+"\x00")...)
-		p.data = append(p.data, Uint32ToBytes(user.Ping)...)
-		p.data = append(p.data, Uint16ToBytes(user.UserId)...)
-		p.data = append(p.data, user.ConnectType)
-		u.SendPacket(server, p)
+		data := make([]byte, 0)
+		data = append(data, 0)
+		data = append(data, Uint32ToBytes(cs.GameId)...)
+		data = append(data, []byte(user.Name+"\x00")...)
+		data = append(data, Uint32ToBytes(user.Ping)...)
+		data = append(data, Uint16ToBytes(user.UserId)...)
+		data = append(data, user.ConnectType)
+		u.SendPacket(server, *NewProtocol(MessageTypeJoinGame, data))
 	}
 	// server info
 	{
-		p := Protocol{}
-		p.header.Seq = uint16(user.SendCount)
-		p.header.MessageType = 0x17
-		p.data = make([]byte, 0)
-		p.data = append(p.data, []byte("Server"+"\x00")...)
-		p.data = append(p.data, []byte(fmt.Sprintf("%s Creates Room: %s\x00", user.Name, fields[1]))...)
-		user.SendPacket(server, p)
+		data := make([]byte, 0)
+		data = append(data, []byte("Server"+"\x00")...)
+		data = append(data, []byte(fmt.Sprintf("%s Creates Room: %s\x00", user.Name, fields[1]))...)
+		user.SendPacket(server, *NewProtocol(MessageTypeServerInfo, data))
 	}
 }
 
@@ -331,44 +296,38 @@ func (s *Service) SvcJoinGame(server net.PacketConn, addr net.Addr, ph Protocol)
 	user.GameRoomId = gameId
 	_ = connType
 	for _, u := range s.userChannel.Users {
-		p := Protocol{}
-		p.header.Seq = uint16(u.SendCount)
-		p.header.MessageType = 0x0E
-		p.data = append(p.data, 0)
-		p.data = append(p.data, Uint32ToBytes(gameId)...)
-		p.data = append(p.data, cs.GameStatus)
-		p.data = append(p.data, uint8(len(cs.Players)))
-		p.data = append(p.data, 4)
-		user.SendPacket(server, p)
+		data := make([]byte, 0)
+		data = append(data, 0)
+		data = append(data, Uint32ToBytes(gameId)...)
+		data = append(data, cs.GameStatus)
+		data = append(data, uint8(len(cs.Players)))
+		data = append(data, 4)
+		u.SendPacket(server, *NewProtocol(MessageTypeUpdateGameStatus, data))
 	}
 	{
-		p := Protocol{}
-		p.header.Seq = uint16(user.SendCount)
-		p.header.MessageType = 0x0D
-		p.data = append(p.data, 0)
-		p.data = append(p.data, Uint32ToBytes(uint32(len(cs.Players))-1)...)
+		data := make([]byte, 0)
+		data = append(data, 0)
+		data = append(data, Uint32ToBytes(uint32(len(cs.Players))-1)...)
 		for _, j := range cs.Players {
 			if j != addr.String() {
 				roomUser := s.userChannel.Users[j]
-				p.data = append(p.data, []byte(roomUser.Name+"\x00")...)
-				p.data = append(p.data, Uint32ToBytes(roomUser.Ping)...)
-				p.data = append(p.data, Uint16ToBytes(roomUser.UserId)...)
-				p.data = append(p.data, roomUser.ConnectType)
+				data = append(data, []byte(roomUser.Name+"\x00")...)
+				data = append(data, Uint32ToBytes(roomUser.Ping)...)
+				data = append(data, Uint16ToBytes(roomUser.UserId)...)
+				data = append(data, roomUser.ConnectType)
 			}
 		}
-		user.SendPacket(server, p)
+		user.SendPacket(server, *NewProtocol(MessageTypePlayerInfo, data))
 	}
 	for _, u := range s.userChannel.Users {
-		p := Protocol{}
-		p.header.Seq = uint16(u.SendCount)
-		p.header.MessageType = 0x0C
-		p.data = append(p.data, 0)
-		p.data = append(p.data, Uint32ToBytes(gameId)...)
-		p.data = append(p.data, []byte(user.Name+"\x00")...)
-		p.data = append(p.data, Uint32ToBytes(user.Ping)...)
-		p.data = append(p.data, Uint16ToBytes(user.UserId)...)
-		p.data = append(p.data, user.ConnectType)
-		u.SendPacket(server, p)
+		data := make([]byte, 0)
+		data = append(data, 0)
+		data = append(data, Uint32ToBytes(gameId)...)
+		data = append(data, []byte(user.Name+"\x00")...)
+		data = append(data, Uint32ToBytes(user.Ping)...)
+		data = append(data, Uint16ToBytes(user.UserId)...)
+		data = append(data, user.ConnectType)
+		u.SendPacket(server, *NewProtocol(MessageTypeJoinGame, data))
 	}
 }
 
@@ -379,21 +338,26 @@ func (s *Service) SvcQuitGame(server net.PacketConn, addr net.Addr, ph Protocol)
 	if user == nil {
 		return
 	}
+	// Quit Game Packet
 	if len(ph.data) == 3 && ph.data[0] == 0x00 && ph.data[1] == 0xff && ph.data[2] == 0xff {
 		cs := s.userChannel.Channels[user.GameRoomId]
 		if cs == nil {
 			return
 		}
-		log.Infof("delete cs: %+v", cs)
-		tmp := cs.Players[:0]
-		for _, j := range cs.Players {
-			if j != user.IpAddr.String() {
-				tmp = append(tmp, j)
+		if cs.GameStatus != GameStatusWaiting {
+			cs.Players[user.PlayerOrder-1] = ""
+		} else {
+			log.Infof("delete cs: %+v", cs)
+			tmp := cs.Players[:0]
+			for _, j := range cs.Players {
+				if j != user.IpAddr.String() {
+					tmp = append(tmp, j)
+				}
 			}
+			cs.Players = tmp
 		}
-		cs.Players = tmp
 		closeGame := false
-		if len(cs.Players) == 0 {
+		if cs.PlayerCount() == 0 {
 			err := s.userChannel.DeleteChannel(user.GameRoomId)
 			closeGame = true
 			if err != nil {
@@ -407,36 +371,30 @@ func (s *Service) SvcQuitGame(server net.PacketConn, addr net.Addr, ph Protocol)
 			log.Infof("closeGame Close")
 			// Game Status Noti
 			for _, u := range s.userChannel.Users {
-				p := Protocol{}
-				p.header.Seq = uint16(u.SendCount)
-				p.header.MessageType = 0x10
-				p.data = append(p.data, 0)
-				p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
-				u.SendPacket(server, p)
+				data := make([]byte, 0)
+				data = append(data, 0)
+				data = append(data, Uint32ToBytes(cs.GameId)...)
+				u.SendPacket(server, *NewProtocol(MessageTypeCloseGame, data))
 			}
 		} else {
 			log.Infof("closeGame Leave")
 			// Game Status Noti
 			for _, u := range s.userChannel.Users {
-				p := Protocol{}
-				p.header.Seq = uint16(u.SendCount)
-				p.header.MessageType = 0x0E
-				p.data = append(p.data, 0)
-				p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
-				p.data = append(p.data, cs.GameStatus)
-				p.data = append(p.data, uint8(len(cs.Players)))
-				p.data = append(p.data, 4)
-				u.SendPacket(server, p)
+				data := make([]byte, 0)
+				data = append(data, 0)
+				data = append(data, Uint32ToBytes(cs.GameId)...)
+				data = append(data, cs.GameStatus)
+				data = append(data, uint8(len(cs.Players)))
+				data = append(data, 4)
+				u.SendPacket(server, *NewProtocol(MessageTypeUpdateGameStatus, data))
 			}
 
 		}
 		for _, u := range s.userChannel.Users {
-			p := Protocol{}
-			p.header.Seq = uint16(user.SendCount)
-			p.header.MessageType = 0x0B
-			p.data = append(p.data, []byte(user.Name+"\x00")...)
-			p.data = append(p.data, Uint16ToBytes(user.UserId)...)
-			u.SendPacket(server, p)
+			data := make([]byte, 0)
+			data = append(data, []byte(user.Name+"\x00")...)
+			data = append(data, Uint16ToBytes(user.UserId)...)
+			u.SendPacket(server, *NewProtocol(MessageTypeQuitGame, data))
 		}
 	}
 	// user := s.userChannel.Users[addr.String()]
@@ -446,43 +404,41 @@ func (s *Service) SvcQuitGame(server net.PacketConn, addr net.Addr, ph Protocol)
 
 func (s *Service) SvcKeepAlive(server net.PacketConn, addr net.Addr, ph Protocol) {
 	log.Infof("================ SvcKeepAlive ===============")
+	// TODO: keepalive impl
 }
 func (s *Service) SvcKickUserFromGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 	log.Infof("================ SvcKickUserFromGame ===============")
+	// TODO: keepalive impl
 }
 func (s *Service) SvcStartGame(server net.PacketConn, addr net.Addr, ph Protocol) {
 	log.Infof("================ SvcStartGame ===============")
 	if len(ph.data) == 5 && ph.data[0] == 0x00 && ph.data[1] == 0xff && ph.data[2] == 0xff && ph.data[3] == 0xff && ph.data[4] == 0xff {
 		user := s.userChannel.Users[addr.String()]
 		cs := s.userChannel.Channels[user.GameRoomId]
-		cs.GameStatus = 2
+		cs.GameStatus = GameStatusNetSync
 		order := uint8(0)
 		for _, u := range s.userChannel.Users {
-			p := Protocol{}
-			p.header.Seq = uint16(u.SendCount)
-			p.header.MessageType = 0x0E
-			p.data = append(p.data, 0)
-			p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
-			p.data = append(p.data, cs.GameStatus)
-			p.data = append(p.data, uint8(len(cs.Players)))
-			p.data = append(p.data, 4)
-			u.SendPacket(server, p)
+			data := make([]byte, 0)
+			data = append(data, 0)
+			data = append(data, Uint32ToBytes(cs.GameId)...)
+			data = append(data, cs.GameStatus)
+			data = append(data, uint8(len(cs.Players)))
+			data = append(data, 4)
+			u.SendPacket(server, *NewProtocol(MessageTypeUpdateGameStatus, data))
 		}
 		for _, j := range cs.Players {
-
 			order += 1
 			u := s.userChannel.Users[j]
-			u.RoomOrder = int(order)
-			p := Protocol{}
-			p.header.MessageType = 0x11
-			p.data = append(p.data, 0)
-			p.data = append(p.data, Uint16ToBytes(1)...)
-			p.data = append(p.data, order)
 			u.PlayerOrder = int(order)
-			tt := len(cs.Players)
-			p.data = append(p.data, byte(tt))
+			u.RoomOrder = int(order)
+			u.PlayerStatus = PlayerStatusPlaying
+			data := make([]byte, 0)
+			data = append(data, 0)
+			data = append(data, Uint16ToBytes(1)...)
+			data = append(data, order)
+			data = append(data, byte(len(cs.Players)))
 			u.ResetOutcoming()
-			u.SendPacket(server, p)
+			u.SendPacket(server, *NewProtocol(MessageTypeStartGame, data))
 		}
 	}
 }
@@ -494,30 +450,22 @@ func (s *Service) SvcReadyToPlaySignal(server net.PacketConn, addr net.Addr, ph 
 		cs := s.userChannel.Channels[user.GameRoomId]
 		cs.GameStatus = 1
 		for _, u := range s.userChannel.Users {
-			p := Protocol{}
-			p.header.Seq = uint16(u.SendCount)
-			p.header.MessageType = 0x0E
-			p.data = append(p.data, 0)
-			p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
-			p.data = append(p.data, cs.GameStatus)
-			p.data = append(p.data, uint8(len(cs.Players)))
-			p.data = append(p.data, 4)
-			u.SendPacket(server, p)
+			data := make([]byte, 0)
+			data = append(data, 0)
+			data = append(data, Uint32ToBytes(cs.GameId)...)
+			data = append(data, cs.GameStatus)
+			data = append(data, uint8(len(cs.Players)))
+			data = append(data, 4)
+			u.SendPacket(server, *NewProtocol(MessageTypeUpdateGameStatus, data))
 		}
 		for _, j := range cs.Players {
 			u := s.userChannel.Users[j]
-			p := Protocol{}
-			p.header.MessageType = 0x15
-			p.data = append(p.data, 0)
-			u.SendPacket(server, p)
+			u.SendPacket(server, *NewProtocol(MessageTypeReadyToPlaySignal, []byte{0}))
 		}
 	}
 }
 
-var seq bool = false
-
 func (s *Service) SvcGameData(server net.PacketConn, addr net.Addr, ph Protocol) {
-	seq = false
 	log.Infof("================ SvcGameData %s===============", addr.String())
 	fmt.Println(hex.Dump(ph.data))
 	if len(ph.data) < 3 {
@@ -535,11 +483,13 @@ func (s *Service) SvcGameData(server net.PacketConn, addr net.Addr, ph Protocol)
 	cs := s.userChannel.Channels[user.GameRoomId]
 	for _, j := range cs.Players {
 		u := s.userChannel.Users[j]
-		u.PlayersInput[user.PlayerOrder-1] = append(u.PlayersInput[user.PlayerOrder-1], gameData...)
+		if u != nil {
+			u.PlayersInput[user.PlayerOrder-1] = append(u.PlayersInput[user.PlayerOrder-1], gameData...)
+		}
 		// fmt.Printf("insert gameData player: %d, playername: %s, %+v, total length: %d\n", user.PlayerOrder-1, user.Name, gameData, len(u.PlayersInput[user.PlayerOrder-1]))
 	}
 
-	s.InputProcess2(server, addr, ph)
+	s.InputProcess(server, addr, ph)
 }
 
 func (s *Service) SvcGameCache(server net.PacketConn, addr net.Addr, ph Protocol) {
@@ -558,16 +508,31 @@ func (s *Service) SvcGameCache(server net.PacketConn, addr net.Addr, ph Protocol
 	cs := s.userChannel.Channels[user.GameRoomId]
 	for _, j := range cs.Players {
 		u := s.userChannel.Users[j]
-		u.PlayersInput[user.PlayerOrder-1] = append(u.PlayersInput[user.PlayerOrder-1], inputData...)
+		if u != nil {
+			u.PlayersInput[user.PlayerOrder-1] = append(u.PlayersInput[user.PlayerOrder-1], inputData...)
+		}
 		// fmt.Printf("cache insert gameData player: %d, playername: %s, %+v, total length: %d\n", user.PlayerOrder-1, user.Name, inputData, len(u.PlayersInput[user.PlayerOrder-1]))
 	}
-	s.InputProcess2(server, addr, ph)
+	s.InputProcess(server, addr, ph)
 
 }
 
-func genInput(cs *ChannelStruct, user *UserStruct) []byte {
+func (s *Service) genInput(cs *ChannelStruct, user *UserStruct) []byte {
 	allInput := true
 	requireBytes := int(user.ConnectType) * 2
+	for i := 0; i < len(cs.Players); i++ {
+		j := cs.Players[i]
+		u := s.userChannel.Users[j]
+		if u == nil {
+			log.Info("nil input, gen input")
+			user.PlayersInput[i] = make([]byte, requireBytes)
+		} else {
+			if u.PlayerStatus == PlayerStatusIdle {
+				log.Info("no input, gen input")
+				user.PlayersInput[i] = make([]byte, requireBytes)
+			}
+		}
+	}
 	for i := 0; i < len(cs.Players); i++ {
 		if len(user.PlayersInput[i]) < requireBytes {
 			// fmt.Printf("player [%d]'s input: %+v\n", i, user.PlayersInput[i])
@@ -608,31 +573,30 @@ func genInput(cs *ChannelStruct, user *UserStruct) []byte {
 	}
 	return totalSum
 }
-func (s *Service) InputProcess2(server net.PacketConn, addr net.Addr, ph Protocol) {
+func (s *Service) InputProcess(server net.PacketConn, addr net.Addr, ph Protocol) {
 	user := s.userChannel.Users[addr.String()]
 	cs := s.userChannel.Channels[user.GameRoomId]
 	// 각 플레이어마다 커넥션  타입에 맞게 패킷 생성해야함.
 	for _, j := range cs.Players {
 		u := s.userChannel.Users[j]
-		sendData := genInput(cs, u)
-		if len(sendData) > 0 {
-			// 보낼 데이터가 캐시에 있는가?
-			cachePos, err := u.putCache.GetCachePosition(sendData)
-			if err != nil {
-				u.putCache.PutData(sendData)
-				p := Protocol{}
-				p.header.MessageType = 0x12
-				p.data = append(p.data, 0)
-				p.data = append(p.data, Uint16ToBytes(uint16(len(sendData)))...)
-				p.data = append(p.data, sendData...)
-				u.SendPacket(server, p)
-			} else {
-				p := Protocol{}
-				// game cache
-				p.header.MessageType = 0x13
-				p.data = append(p.data, 0)
-				p.data = append(p.data, cachePos)
-				u.SendPacket(server, p)
+		if u != nil {
+			sendData := s.genInput(cs, u)
+			if len(sendData) > 0 {
+				// 보낼 데이터가 캐시에 있는가?
+				cachePos, err := u.putCache.GetCachePosition(sendData)
+				if err != nil {
+					u.putCache.PutData(sendData)
+					data := make([]byte, 0)
+					data = append(data, 0)
+					data = append(data, Uint16ToBytes(uint16(len(sendData)))...)
+					data = append(data, sendData...)
+					u.SendPacket(server, *NewProtocol(MessageTypeGameData, data))
+				} else {
+					data := make([]byte, 0)
+					data = append(data, 0)
+					data = append(data, cachePos)
+					u.SendPacket(server, *NewProtocol(MessageTypeGameCache, data))
+				}
 			}
 		}
 	}
@@ -648,27 +612,36 @@ func (s *Service) SvcDropGame(server net.PacketConn, addr net.Addr, ph Protocol)
 	}
 	user := s.userChannel.Users[addr.String()]
 	cs := s.userChannel.Channels[user.GameRoomId]
-	cs.GameStatus = 0
+	// cs.GameStatus = GameStatusWaiting
 	for _, u := range s.userChannel.Users {
-		p := Protocol{}
-		p.header.Seq = uint16(u.SendCount)
-		p.header.MessageType = 0x0E
-		p.data = append(p.data, 0)
-		p.data = append(p.data, Uint32ToBytes(cs.GameId)...)
-		p.data = append(p.data, cs.GameStatus)
-		p.data = append(p.data, uint8(len(cs.Players)))
-		p.data = append(p.data, 4)
-		u.SendPacket(server, p)
+		data := make([]byte, 0)
+		data = append(data, 0)
+		data = append(data, Uint32ToBytes(cs.GameId)...)
+		data = append(data, cs.GameStatus)
+		data = append(data, uint8(len(cs.Players)))
+		data = append(data, 4)
+		u.SendPacket(server, *NewProtocol(MessageTypeUpdateGameStatus, data))
 	}
 	for _, j := range cs.Players {
 		u := s.userChannel.Users[j]
-		p := Protocol{}
-		// game data
-		p.header.MessageType = 0x14
-		p.data = append(p.data, []byte(user.Name+"\x00")...)
-		p.data = append(p.data, byte(user.RoomOrder))
-		u.SendPacket(server, p)
+		if u != nil {
+			data := make([]byte, 0)
+			// game data
+			data = append(data, []byte(user.Name+"\x00")...)
+			data = append(data, byte(user.RoomOrder))
+			u.SendPacket(server, *NewProtocol(MessageTypeDropGame, data))
+
+		}
 	}
+	for _, j := range cs.Players {
+		u := s.userChannel.Users[j]
+		if u != nil {
+			u.PlayersInput[user.PlayerOrder-1] = append(u.PlayersInput[user.PlayerOrder-1], make([]byte, 2*user.ConnectType)...)
+		}
+	}
+	s.InputProcess(server, addr, ph)
+	// cs.Players[user.PlayerOrder-1] = ""
+	user.PlayerStatus = PlayerStatusIdle
 	log.Infof("================ SvcDropGame Ok ===============")
 }
 
