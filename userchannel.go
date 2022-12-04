@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sync"
 )
 
 type UserStruct struct {
@@ -34,14 +33,12 @@ type UserStruct struct {
 	// CachePosition    uint8
 	// IncomingGameData map[uint8][]byte
 	// IncomingHitCache map[string]uint8
-	RequireFrame int
 	// 보내기전에 HitCache 에 조회해보고 있으면 value 보내고
 	//                                   없으면 GameData 보냄.
 }
 
 func (u *UserStruct) ResetOutcoming() {
 	u.cacheSystem.Reset()
-	u.RequireFrame = 0
 }
 
 func NewUserStruct() *UserStruct {
@@ -55,9 +52,15 @@ func NewUserStruct() *UserStruct {
 func (u *UserStruct) SendPacket(server net.PacketConn, p Protocol) {
 	p.header.Seq = uint16(u.SendCount)
 	u.Packets = append(u.Packets, p)
+	extraPackets := 3
+	if extraPackets > len(u.Packets) {
+		extraPackets = len(u.Packets)
+	}
 	packet := make([]byte, 0)
-	packet = append(packet, 1) // N = 1
-	packet = append(packet, p.MakePacket()...)
+	packet = append(packet, byte(extraPackets)) // N = 1
+	for i := 0; i < extraPackets; i++ {
+		packet = append(packet, u.Packets[len(u.Packets)-1-i].MakePacket()...)
+	}
 	server.WriteTo(packet, u.IpAddr)
 	// log.Infof("WriteTo: %s", u.IpAddr.String())
 	u.SendCount += 1
@@ -86,17 +89,12 @@ type UserChannel struct {
 	NextUserId uint16
 }
 
-var instance *UserChannel
-var once sync.Once
-
-func GetUC() *UserChannel {
-	once.Do(func() {
-		instance = &UserChannel{
-			Users:      map[string]*UserStruct{},
-			Channels:   map[uint32]*ChannelStruct{},
-			NextUserId: 0x01,
-		}
-	})
+func NewUserChannel() *UserChannel {
+	instance := &UserChannel{
+		Users:      map[string]*UserStruct{},
+		Channels:   map[uint32]*ChannelStruct{},
+		NextUserId: 0x01,
+	}
 	return instance
 }
 
@@ -141,10 +139,10 @@ func Uint16ToBytes(i uint16) []byte {
 func (t *UserChannel) MakeServerStatus(seq uint16, user *UserStruct) Protocol {
 	ret := make([]byte, 0)
 	ret = append(ret, 0)
-	ret = append(ret, Uint32ToBytes(uint32(len(GetUC().Users)-1))...)
-	ret = append(ret, Uint32ToBytes(uint32(len(GetUC().Channels)))...)
+	ret = append(ret, Uint32ToBytes(uint32(len(t.Users)-1))...)
+	ret = append(ret, Uint32ToBytes(uint32(len(t.Channels)))...)
 
-	for _, j := range GetUC().Users {
+	for _, j := range t.Users {
 		// 본인은 제외함.
 		if j.IpAddr.String() != user.IpAddr.String() {
 			log.Infof("Make ServerStatus User %s", j.Name)
@@ -157,7 +155,7 @@ func (t *UserChannel) MakeServerStatus(seq uint16, user *UserStruct) Protocol {
 			ret = append(ret, j.ConnectType)
 		}
 	}
-	for _, j := range GetUC().Channels {
+	for _, j := range t.Channels {
 		ret = append(ret, []byte(j.GameName+"\x00")...)
 		ret = append(ret, Uint32ToBytes(j.GameId)...)
 		ret = append(ret, []byte(j.EmulName+"\x00")...)
