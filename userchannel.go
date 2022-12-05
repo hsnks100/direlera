@@ -20,6 +20,7 @@ type UserStruct struct {
 	SendCount    int32
 	CurSeq       int
 	GameRoomId   uint32
+	InRoom       bool
 	RoomOrder    int
 	Packets      []Protocol // 보낸 패킷들
 	CallCnt      int
